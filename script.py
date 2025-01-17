@@ -1,5 +1,5 @@
-import requests
-from bs4 import BeautifulSoup
+import requests  # type: ignore
+from bs4 import BeautifulSoup  # type: ignore
 from urllib.parse import urljoin
 
 # Функция для парсинга таблицы с кодами УДК
@@ -31,50 +31,55 @@ def parse_udc_table(url):
     
     return udc_data
 
+# Функция для рекурсивного обхода сайта
+def crawl_site(url, visited_urls, file):
+    # Проверяем, если мы уже посещали эту ссылку
+    if url in visited_urls:
+        print(f"Ссылка уже обработана: {url}")
+        return
+    
+    print(f"Проникаем в {url}...")
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    
+    # Сначала парсим данные текущей страницы
+    udc_data = parse_udc_table(url)
+    
+    # Записываем данные в файл
+    for code, description in udc_data:
+        file.write(f"{code}: {description}\n")
+    file.flush()  # Сбрасываем данные в файл
+    
+    # Получаем все ссылки на текущей странице
+    links = soup.find_all('a', href=True)
+    sub_category_links = [
+        urljoin(url, link['href']) 
+        for link in links
+        if link['href'].endswith('.html')  # Только ссылки на HTML
+        and not link['href'].startswith('../index')
+        and not link['href'].startswith('about')  # Исключаем index
+        and not link['href'].startswith('../dc')  # Исключаем dc
+        and "вверх" not in link.text.lower()  # Исключаем ссылки с текстом "вверх"
+    ]
+    
+    # Отмечаем текущий URL как посещённый
+    visited_urls.add(url)
+    
+    # Если есть подкатегории, обходим их
+    if sub_category_links:
+        print(f"Найдены подкатегории на {url}. Продолжаем обход...")
+        for link in sub_category_links:
+            crawl_site(link, visited_urls, file)
+    else:
+        print(f"Ссылок для перехода дальше на {url} нет.")
+
 # Начальная ссылка
 base_url = "https://teacode.com/online/udc/"
 
-# Получаем начальную страницу
-response = requests.get(base_url)
-soup = BeautifulSoup(response.content, 'html.parser')
-
-# Парсим таблицу с главной страницы
-print(f"Парсинг данных с {base_url}...")
-main_page_data = parse_udc_table(base_url)
-
-# Находим все ссылки на подкатегории УДК (исключаем текущую страницу)
-links = soup.find_all('a', href=True)
-
-# Создаем полный URL для каждой ссылки
-sub_category_links = [urljoin(base_url, link['href']) for link in links if link['href'].startswith('./')]
-
 # Открываем файл для записи данных
 with open('udc_data.txt', 'w', encoding='utf-8') as file:
-    data_found = False  # Переменная для отслеживания, были ли найдены данные
-    # Записываем данные с главной страницы
-    if main_page_data:
-        data_found = True
-        for code, description in main_page_data:
-            file.write(f"{code}: {description}\n")
-    else:
-        print(f"Нет данных для записи на главной странице.")
-
-    # Парсим данные для каждой подкатегории
-    for link in sub_category_links:
-        print(f"Парсинг данных с {link}...")
-        # Парсим таблицу с кодами УДК на текущей странице
-        udc_data = parse_udc_table(link)
-        
-        # Проверяем, что данные были получены
-        if udc_data:
-            data_found = True
-            # Записываем данные в файл
-            for code, description in udc_data:
-                file.write(f"{code}: {description}\n")
-        else:
-            print(f"Нет данных для записи на странице: {link}")
-
-    if not data_found:
-        print("Данные не были найдены на страницах.")
+    # Запускаем рекурсивный обход с главной страницы
+    visited_urls = set()
+    crawl_site(base_url, visited_urls, file)
 
 print("Парсинг завершен, данные сохранены в 'udc_data.txt'.")
